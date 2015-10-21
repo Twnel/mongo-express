@@ -1,4 +1,4 @@
 FROM knickers/mongo-express
 
-WORKDIR /app
+WORKDIR /node_modules/mongo-express
 ADD config.js .
