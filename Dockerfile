@@ -1,4 +1,4 @@
-FROM andzdroid/mongo-express
+FROM knickers/mongo-express
 
 WORKDIR /app
 ADD config.js .
