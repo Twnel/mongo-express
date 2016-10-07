@@ -1,0 +1,77 @@
+machine:
+  environment:
+    IMG: ${CIRCLE_PROJECT_REPONAME}:${CIRCLE_BRANCH}
+    CNAME: ${CIRCLE_PROJECT_REPONAME}
+    KUBE_CONFIG: config_kube_${CIRCLE_BRANCH}
+    PORT: 3090:3000
+  #pre:
+  #  - sudo curl -L -o /usr/bin/docker 'https://s3-external-1.amazonaws.com/circle-downloads/docker-1.9.0-circleci'
+  #  - sudo chmod 0755 /usr/bin/docker
+  python:
+    version: 2.7.3
+  services:
+    - docker
+
+dependencies:
+  #cache_directories:
+  #  - "~/docker"
+  override:
+    - >
+      sudo /opt/google-cloud-sdk/bin/gcloud --quiet components update; 
+      sudo /opt/google-cloud-sdk/bin/gcloud --quiet components update kubectl; 
+      echo $GCLOUD_SERVICE_KEY | base64 --decode -i > ${HOME}/gcloud-service-key.json; 
+      sudo /opt/google-cloud-sdk/bin/gcloud auth activate-service-account --key-file ${HOME}/gcloud-service-key.json; 
+      sudo /opt/google-cloud-sdk/bin/gcloud config set project $GCLOUD_PROJECT; 
+      sudo /opt/google-cloud-sdk/bin/gcloud --quiet config set container/cluster $GCLOUD_CLUSTER; 
+      sudo /opt/google-cloud-sdk/bin/gcloud config set compute/zone ${GCLOUD_COMPUTE_ZONE}; 
+      sudo /opt/google-cloud-sdk/bin/gcloud --quiet container clusters get-credentials $GCLOUD_CLUSTER
+
+    - >
+      export IMG_AWS="${AWS_ECR_ACCOUNT}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMG}"; 
+      export IMG_GKE="${GCLOUD_REGISTRY}/${GCLOUD_PROJECT}/${IMG}"; 
+      echo "${IMG}, ${PORT}"; 
+      docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS; 
+      bash -c "$(aws ecr get-login)"; 
+      docker info; 
+      docker pull ${IMG_AWS} || true; 
+      docker build --rm=false -t ${IMG_AWS} .; 
+      docker tag ${IMG_AWS} ${IMG_GKE}; 
+      docker tag ${IMG_AWS} "${IMG_GKE}${CIRCLE_BUILD_NUM}"; 
+      docker tag ${IMG_AWS} "${IMG_AWS}${CIRCLE_BUILD_NUM}"; 
+      #docker load -i ~/docker/${CIRCLE_PROJECT_REPONAME}.tar || true; 
+      #mkdir -p ~/docker; docker save ${IMG} > ~/docker/${CIRCLE_PROJECT_REPONAME}.tar || true; 
+      #docker tag ${IMG} ${DOCKER_USER}/${IMG}; 
+      #docker tag ${IMG_AWS} ${DOCKER_USER}/${IMG}-${CIRCLE_BUILD_NUM}; 
+      #docker tag ${IMG_AWS} "${AWS_ECR_ACCOUNT}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMG}"; 
+
+    - echo ${!KUBE_CONFIG} | base64 -di > ${HOME}/${KUBE_CONFIG};
+
+test:
+  override:
+    - echo "${IMG}, ${PORT}, check-config.sh"
+    - printenv > $(pwd)/.env
+
+deployment:
+  dev:
+    branch: dev
+    commands:
+      - >
+        export IMG_AWS="${AWS_ECR_ACCOUNT}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMG}"; 
+        export IMG_GKE="${GCLOUD_REGISTRY}/${GCLOUD_PROJECT}/${IMG}"; 
+        docker push ${IMG_AWS}; 
+        sudo /opt/google-cloud-sdk/bin/gcloud docker push ${IMG_GKE}; 
+        # docker push ${DOCKER_USER}/${IMG}; 
+      
+      #- kubectl --kubeconfig=${HOME}/${KUBE_CONFIG} --namespace ui delete pods --selector=app=${CIRCLE_PROJECT_REPONAME}
+  master:
+    branch: master
+    commands:
+      - >
+        export IMG_AWS="${AWS_ECR_ACCOUNT}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMG}"; 
+        export IMG_GKE="${GCLOUD_REGISTRY}/${GCLOUD_PROJECT}/${IMG}"; 
+        docker push ${IMG_AWS}; 
+        docker push "${IMG_AWS}${CIRCLE_BUILD_NUM}"; 
+        sudo /opt/google-cloud-sdk/bin/gcloud docker push ${IMG_GKE}; 
+        sudo /opt/google-cloud-sdk/bin/gcloud docker push "${IMG_GKE}${CIRCLE_BUILD_NUM}"; 
+        #docker push ${DOCKER_USER}/${IMG}; 
+        #docker push ${DOCKER_USER}/${IMG}-${CIRCLE_BUILD_NUM};
